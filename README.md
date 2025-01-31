@@ -82,4 +82,5 @@ IP:PORT:LOGIN:PASSWORD
 ## 🖼 Скрин работы софта
 
 
-![screen](https://github.com/user-attachments/assets/a7750ee4-4bff-46bc-a6ee-e7ab485e58d3)
+![screen](https://github.com/user-attachments/assets/2b0e9c56-be60-446d-8c56-20b3db85bd63)
+
